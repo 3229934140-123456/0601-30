@@ -115,7 +115,9 @@ def print_media_detail(media: Dict):
     if media["type"] == "tv":
         info_lines.append(f"[bold]季数:[/bold] {media.get('total_seasons', '-')} 季")
         if media.get("total_episodes"):
-            info_lines.append(f"[bold]总集数:[/bold] {media['total_episodes']} 集")
+            info_lines.append(f"[bold]总集数:[/bold] {media['total_episodes']} 集/季")
+        if media.get("next_episode_date"):
+            info_lines.append(f"[bold]下集更新:[/bold] [green]{media['next_episode_date']}[/green]")
 
     if media.get("rating") is not None:
         info_lines.append(f"[bold]评分:[/bold] ⭐ {media['rating']:.1f}")
@@ -153,6 +155,7 @@ def print_season_progress(seasons: List[Dict]):
         total = s.get("total_episodes")
 
         if total:
+            watched = min(watched, total)
             bar_len = 30
             filled = int(bar_len * watched / total)
             bar = "█" * filled + "░" * (bar_len - filled)
@@ -167,42 +170,60 @@ def print_season_progress(seasons: List[Dict]):
     console.print(table)
 
 
-def print_calendar(items: List[Dict]):
-    if not items:
-        console.print(Panel("[dim]本周没有更新剧集[/dim]", title="📅 本周更新日历", border_style="dim"))
-        return
+def print_calendar(calendar_data: Dict):
+    weekly = calendar_data.get("weekly", [[] for _ in range(7)])
+    unscheduled = calendar_data.get("unscheduled", [])
+    upcoming = calendar_data.get("upcoming", [])
+    start_of_week = calendar_data.get("start_of_week")
+    end_of_week = calendar_data.get("end_of_week")
 
-    grouped = {i: [] for i in range(8)}
-    for item in items:
-        wd = item.get("_weekday", 7)
-        grouped[wd].append(item)
+    title = "📅 本周更新日历"
+    if start_of_week and end_of_week:
+        title += f" ({start_of_week.strftime('%m/%d')} - {end_of_week.strftime('%m/%d')})"
 
-    table = Table(title="📅 本周更新日历", box=box.ROUNDED, show_lines=True)
-    table.add_column("星期", style="bold cyan", width=10)
+    table = Table(title=title, box=box.ROUNDED, show_lines=True)
+    table.add_column("星期", style="bold cyan", width=12)
     table.add_column("剧集")
 
-    for wd in range(8):
-        day_items = grouped[wd]
+    has_any_this_week = any(len(items) > 0 for items in weekly)
+
+    for wd in range(7):
+        day_items = weekly[wd]
         day_name = WEEKDAYS[wd]
+        date_str = ""
+        if start_of_week:
+            from datetime import timedelta
+            d = start_of_week + timedelta(days=wd)
+            date_str = f"[dim]({d.strftime('%m/%d')})[/dim]"
 
         if day_items:
             item_texts = []
             for item in day_items:
-                date_info = ""
-                if item.get("_date_obj"):
-                    date_info = f"[dim]({item['_date_obj'].strftime('%m/%d')})[/dim]"
-
                 status = item.get("status", "watchlist")
                 color = STATUS_COLORS.get(status, "white")
                 icon = "🎬" if status == "watching" else "📋"
-                item_texts.append(f"{icon} [{color}]{item['title']}[/{color}] {date_info}")
+                item_texts.append(f"{icon} [{color}]{item['title']}[/{color}]")
             content = "\n".join(item_texts)
         else:
             content = "[dim]无更新[/dim]"
 
-        table.add_row(day_name, content)
+        table.add_row(f"{day_name} {date_str}", content)
 
     console.print(table)
+
+    if upcoming:
+        upcoming_texts = []
+        for item in upcoming:
+            d = item.get("_date_obj")
+            date_str = d.strftime("%m/%d") if d else "?"
+            upcoming_texts.append(f"📺 {item['title']} [dim]({date_str})[/dim]")
+        console.print(f"\n[bold cyan]⏳ 即将更新:[/bold cyan] {'  '.join(upcoming_texts)}")
+
+    if unscheduled:
+        unscheduled_text = "  ".join(f"📺 {item['title']}" for item in unscheduled)
+        console.print(f"\n[dim]未设定更新日:[/dim] {unscheduled_text}")
+    elif not has_any_this_week and not upcoming:
+        console.print("\n[dim]本周没有更新剧集[/dim]")
 
 
 def success(msg: str):

@@ -21,9 +21,10 @@ from .formatting import success, error, info, warning, print_media_detail, conso
 @click.option("--tags", "-t", help="标签，逗号分隔")
 @click.option("--status", type=click.Choice(["watchlist", "watching", "finished", "dropped"]),
               default="watchlist", help="状态")
+@click.option("--next-episode-date", "next_episode_date", help="下一集更新日期 YYYY-MM-DD（剧集）")
 @click.option("--force", is_flag=True, help="跳过重复检查强制添加")
 def add(title, media_type, year, original_title, director, cast, genre,
-        seasons, episodes, runtime, summary, tags, status, force):
+        seasons, episodes, runtime, summary, tags, status, next_episode_date, force):
     """添加影视条目到片单"""
 
     if not force:
@@ -51,6 +52,7 @@ def add(title, media_type, year, original_title, director, cast, genre,
         "summary": summary,
         "tags": tags,
         "status": status,
+        "next_episode_date": next_episode_date if media_type == "tv" else None,
     }
 
     try:
@@ -70,11 +72,12 @@ def add(title, media_type, year, original_title, director, cast, genre,
 @click.option("--director", help="导演")
 @click.option("--cast", help="主演")
 @click.option("--genre", help="类型")
-@click.option("--seasons", type=int, help="总季数")
-@click.option("--episodes", type=int, help="总集数")
+@click.option("--seasons", type=int, help="总季数（剧集）")
+@click.option("--episodes", type=int, help="每季总集数（剧集）")
 @click.option("--runtime", type=int, help="片长")
 @click.option("--summary", help="简介")
 @click.option("--status", type=click.Choice(["watchlist", "watching", "finished", "dropped"]), help="状态")
+@click.option("--next-episode-date", "next_episode_date", help="下一集更新日期 YYYY-MM-DD（剧集）")
 def edit(media_id, **kwargs):
     """编辑影视条目信息"""
 
@@ -83,10 +86,19 @@ def edit(media_id, **kwargs):
         error(f"未找到 ID 为 {media_id} 的条目")
         return
 
-    updates = {k: v for k, v in kwargs.items() if v is not None}
-    if not updates:
+    raw_updates = {k: v for k, v in kwargs.items() if v is not None}
+    if not raw_updates:
         info("没有要更新的内容")
         return
+
+    updates = {}
+    for k, v in raw_updates.items():
+        if k == "seasons":
+            updates["total_seasons"] = v
+        elif k == "episodes":
+            updates["total_episodes"] = v
+        else:
+            updates[k] = v
 
     if update_media(media_id, updates):
         success(f"已更新：{media['title']}")

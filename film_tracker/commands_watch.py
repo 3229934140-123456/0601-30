@@ -111,7 +111,8 @@ def search_cmd(keyword, tag, director, cast, media_type, status):
     from .services import search_media
     from .formatting import print_media_list
 
-    if not keyword and not tag and not director and not cast:
+    has_any_condition = any([keyword, tag, director, cast, media_type, status])
+    if not has_any_condition:
         error("请提供搜索关键词或筛选条件")
         return
 
@@ -128,6 +129,11 @@ def search_cmd(keyword, tag, director, cast, media_type, status):
     conditions = []
     if keyword:
         conditions.append(f"\"{keyword}\"")
+    if media_type:
+        conditions.append("电影" if media_type == "movie" else "剧集")
+    if status:
+        from .formatting import STATUS_LABELS
+        conditions.append(STATUS_LABELS.get(status, status))
     if tag:
         conditions.append(f"#{tag}")
     if director:
@@ -135,7 +141,7 @@ def search_cmd(keyword, tag, director, cast, media_type, status):
     if cast:
         conditions.append(f"演员:{cast}")
     if conditions:
-        title += ": " + " ".join(conditions)
+        title += ": " + " · ".join(conditions)
 
     print_media_list(results, title=title)
 
@@ -217,8 +223,12 @@ def _export_markdown(items):
                 if detail.get("seasons"):
                     for season in detail["seasons"]:
                         w = season.get("watched_episodes", 0) or 0
-                        t = season.get("total_episodes") or "?"
-                        progress += f" S{season['season_number']}: {w}/{t}"
+                        t = season.get("total_episodes")
+                        if t:
+                            w = min(w, t)
+                            progress += f" S{season['season_number']}: {w}/{t}"
+                        else:
+                            progress += f" S{season['season_number']}: {w}/?"
 
                 rating = f" ⭐{item['rating']:.1f}" if item.get("rating") else ""
                 tags = f" `{', '.join(item.get('tags_list', []))}`" if item.get("tags_list") else ""

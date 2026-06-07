@@ -173,15 +173,89 @@ def update_media(media_id: int, data: Dict) -> bool:
 
     data["updated_at"] = datetime.now().isoformat()
 
-    sets = ", ".join([f"{k} = ?" for k in data.keys()])
-    values = list(data.values())
-    values.append(media_id)
+    season_change = False
+    new_seasons = None
+    new_episodes = None
 
-    c.execute(f"UPDATE media SET {sets} WHERE id = ?", values)
+    if "total_seasons" in data:
+        season_change = True
+        new_seasons = data.pop("total_seasons")
+    if "total_episodes" in data:
+        season_change = True
+        new_episodes = data.pop("total_episodes")
+
+    if data:
+        sets = ", ".join([f"{k} = ?" for k in data.keys()])
+        values = list(data.values())
+        values.append(media_id)
+        c.execute(f"UPDATE media SET {sets} WHERE id = ?", values)
+
+    if season_change:
+        c.execute("SELECT type FROM media WHERE id = ?", (media_id,))
+        row = c.fetchone()
+        if row and row["type"] == "tv":
+            if new_seasons is not None:
+                c.execute("UPDATE media SET total_seasons = ? WHERE id = ?",
+                          (new_seasons, media_id))
+                if new_episodes is not None:
+                    c.execute("UPDATE media SET total_episodes = ? WHERE id = ?",
+                              (new_episodes, media_id))
+
+                c.execute("SELECT season_number, watched_episodes, total_episodes FROM seasons WHERE media_id = ? ORDER BY season_number", (media_id,))
+                existing = {r["season_number"]: dict(r) for r in c.fetchall()}
+
+                for s_num in range(1, new_seasons + 1):
+                    if s_num in existing:
+                        if new_episodes is not None:
+                            c.execute(
+                                "UPDATE seasons SET total_episodes = ? WHERE media_id = ? AND season_number = ?",
+                                (new_episodes, media_id, s_num)
+                            )
+                    else:
+                        c.execute(
+                            "INSERT INTO seasons (media_id, season_number, total_episodes, watched_episodes) VALUES (?, ?, ?, 0)",
+                            (media_id, s_num, new_episodes)
+                        )
+
+                if len(existing) > new_seasons:
+                    c.execute(
+                        "DELETE FROM seasons WHERE media_id = ? AND season_number > ?",
+                        (media_id, new_seasons)
+                    )
+            elif new_episodes is not None:
+                c.execute("SELECT COUNT(*) as cnt FROM seasons WHERE media_id = ?", (media_id,))
+                cnt = c.fetchone()["cnt"]
+                if cnt == 0:
+                    c.execute(
+                        "INSERT INTO seasons (media_id, season_number, total_episodes, watched_episodes) VALUES (?, 1, ?, 0)",
+                        (media_id, new_episodes)
+                    )
+                else:
+                    c.execute(
+                        "UPDATE seasons SET total_episodes = ? WHERE media_id = ?",
+                        (new_episodes, media_id)
+                    )
+                c.execute("UPDATE media SET total_episodes = ? WHERE id = ?",
+                          (new_episodes, media_id))
+
+            _normalize_season_progress(c, media_id)
+
     conn.commit()
-    affected = c.rowcount > 0
+    affected = True
     conn.close()
     return affected
+
+
+def _normalize_season_progress(cursor, media_id: int):
+    cursor.execute("SELECT id, watched_episodes, total_episodes FROM seasons WHERE media_id = ?", (media_id,))
+    for row in cursor.fetchall():
+        total = row["total_episodes"]
+        watched = row["watched_episodes"] or 0
+        if total and watched > total:
+            cursor.execute(
+                "UPDATE seasons SET watched_episodes = ? WHERE id = ?",
+                (total, row["id"])
+            )
 
 
 def delete_media(media_id: int) -> bool:
@@ -378,7 +452,7 @@ def increment_rewatch(media_id: int) -> int:
     return new_count
 
 
-def get_weekly_calendar() -> List[Dict]:
+def get_weekly_calendar() -> Dict[str, List]:
     conn = get_connection()
     c = conn.cursor()
 
@@ -392,25 +466,39 @@ def get_weekly_calendar() -> List[Dict]:
         ORDER BY next_episode_date IS NULL, next_episode_date ASC
     """)
 
-    results = []
+    weekly_items = [[] for _ in range(7)]
+    unscheduled_items = []
+    upcoming_items = []
+
     for row in c.fetchall():
         item = dict(row)
         next_date = item.get("next_episode_date")
-        if next_date:
-            try:
-                nd = date.fromisoformat(next_date)
-                item["_weekday"] = nd.weekday()
-                item["_date_obj"] = nd
-            except (ValueError, TypeError):
-                item["_weekday"] = 7
-                item["_date_obj"] = None
+
+        if not next_date:
+            unscheduled_items.append(item)
+            continue
+
+        try:
+            nd = date.fromisoformat(next_date[:10])
+        except (ValueError, TypeError):
+            unscheduled_items.append(item)
+            continue
+
+        if start_of_week <= nd <= end_of_week:
+            item["_date_obj"] = nd
+            weekly_items[nd.weekday()].append(item)
         else:
-            item["_weekday"] = 7
-            item["_date_obj"] = None
-        results.append(item)
+            item["_date_obj"] = nd
+            upcoming_items.append(item)
 
     conn.close()
-    return results
+    return {
+        "weekly": weekly_items,
+        "unscheduled": unscheduled_items,
+        "upcoming": upcoming_items,
+        "start_of_week": start_of_week,
+        "end_of_week": end_of_week,
+    }
 
 
 def get_yearly_stats(year: int) -> Dict:

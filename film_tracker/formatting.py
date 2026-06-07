@@ -174,6 +174,7 @@ def print_calendar(calendar_data: Dict):
     weekly = calendar_data.get("weekly", [[] for _ in range(7)])
     unscheduled = calendar_data.get("unscheduled", [])
     upcoming = calendar_data.get("upcoming", [])
+    past = calendar_data.get("past", [])
     start_of_week = calendar_data.get("start_of_week")
     end_of_week = calendar_data.get("end_of_week")
 
@@ -218,6 +219,14 @@ def print_calendar(calendar_data: Dict):
             date_str = d.strftime("%m/%d") if d else "?"
             upcoming_texts.append(f"📺 {item['title']} [dim]({date_str})[/dim]")
         console.print(f"\n[bold cyan]⏳ 即将更新:[/bold cyan] {'  '.join(upcoming_texts)}")
+
+    if past:
+        past_texts = []
+        for item in past:
+            d = item.get("_date_obj")
+            date_str = d.strftime("%m/%d") if d else "?"
+            past_texts.append(f"📺 {item['title']} [dim]({date_str})[/dim]")
+        console.print(f"\n[yellow]⏰ 已过期更新:[/yellow] {'  '.join(past_texts)}")
 
     if unscheduled:
         unscheduled_text = "  ".join(f"📺 {item['title']}" for item in unscheduled)

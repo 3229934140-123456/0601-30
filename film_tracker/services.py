@@ -298,14 +298,50 @@ def watch_episode(media_id: int, season: int, episode: int) -> Dict:
 
     if not season_row:
         c.execute(
-            "INSERT INTO seasons (media_id, season_number, watched_episodes) VALUES (?, ?, ?)",
-            (media_id, season, 0)
+            "INSERT INTO seasons (media_id, season_number, watched_episodes) VALUES (?, ?, 0)",
+            (media_id, season)
         )
         c.execute("SELECT * FROM seasons WHERE id = ?", (c.lastrowid,))
         season_row = c.fetchone()
 
+    total_episodes = season_row["total_episodes"]
     current_watched = season_row["watched_episodes"] or 0
-    new_watched = max(current_watched, episode)
+
+    if total_episodes and episode > total_episodes:
+        conn.close()
+        return {
+            "media_id": media_id,
+            "season": season,
+            "episode": current_watched,
+            "requested_episode": episode,
+            "total_episodes": total_episodes,
+            "status": "over_limit",
+            "already_finished": current_watched >= total_episodes
+        }
+
+    if total_episodes and current_watched >= total_episodes:
+        conn.close()
+        return {
+            "media_id": media_id,
+            "season": season,
+            "episode": current_watched,
+            "requested_episode": episode,
+            "total_episodes": total_episodes,
+            "status": "already_finished"
+        }
+
+    if episode <= current_watched:
+        conn.close()
+        return {
+            "media_id": media_id,
+            "season": season,
+            "episode": current_watched,
+            "requested_episode": episode,
+            "total_episodes": total_episodes,
+            "status": "already_watched"
+        }
+
+    new_watched = episode
 
     c.execute(
         "UPDATE seasons SET watched_episodes = ? WHERE id = ?",
@@ -325,10 +361,12 @@ def watch_episode(media_id: int, season: int, episode: int) -> Dict:
 
     all_finished = True
     for s in all_seasons:
-        if s["total_episodes"] and s["watched_episodes"] < s["total_episodes"]:
+        total = s["total_episodes"]
+        watched = s["watched_episodes"] or 0
+        if total and watched < total:
             all_finished = False
             break
-        if not s["total_episodes"] and s["watched_episodes"] == 0:
+        if not total and watched == 0:
             all_finished = False
             break
 
@@ -346,7 +384,10 @@ def watch_episode(media_id: int, season: int, episode: int) -> Dict:
         "media_id": media_id,
         "season": season,
         "episode": new_watched,
-        "status": status
+        "requested_episode": episode,
+        "total_episodes": total_episodes,
+        "status": status,
+        "all_finished": all_finished
     }
 
 
@@ -469,6 +510,7 @@ def get_weekly_calendar() -> Dict[str, List]:
     weekly_items = [[] for _ in range(7)]
     unscheduled_items = []
     upcoming_items = []
+    past_items = []
 
     for row in c.fetchall():
         item = dict(row)
@@ -484,20 +526,24 @@ def get_weekly_calendar() -> Dict[str, List]:
             unscheduled_items.append(item)
             continue
 
-        if start_of_week <= nd <= end_of_week:
-            item["_date_obj"] = nd
+        item["_date_obj"] = nd
+
+        if nd < today:
+            past_items.append(item)
+        elif start_of_week <= nd <= end_of_week:
             weekly_items[nd.weekday()].append(item)
         else:
-            item["_date_obj"] = nd
             upcoming_items.append(item)
 
     conn.close()
     return {
         "weekly": weekly_items,
-        "unscheduled": unscheduled_items,
         "upcoming": upcoming_items,
+        "past": past_items,
+        "unscheduled": unscheduled_items,
         "start_of_week": start_of_week,
         "end_of_week": end_of_week,
+        "today": today,
     }
 
 

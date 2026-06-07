@@ -45,29 +45,37 @@ def watch(media_id, season, episode, next_ep, finish):
         from .services import add_season
         add_season(media_id, season)
         current_watched = 0
+        total_ep = None
     else:
         current_watched = season_map[season]["watched_episodes"] or 0
+        total_ep = season_map[season].get("total_episodes")
 
     if finish:
-        season_data = season_map.get(season)
-        if season_data and season_data.get("total_episodes"):
-            episode = season_data["total_episodes"]
+        if total_ep:
+            episode = total_ep
         else:
             error("该季没有设置总集数，无法标记完成")
             return
     elif episode is None:
         episode = current_watched + 1
 
-    if episode <= current_watched:
-        info(f"第{season}季第{episode}集已经看过了")
-        print_season_progress(get_seasons(media_id))
-        return
-
     result = watch_episode(media_id, season, episode)
-    success(f"已记录：{media['title']} 第{season}季第{episode}集")
+    status = result.get("status")
 
-    if result["status"] == "finished":
-        info("🎉 恭喜！这部剧已全部看完")
+    if status == "over_limit":
+        total = result.get("total_episodes", "?")
+        error(f"第{season}季只有 {total} 集，第{episode}集不存在")
+        if result.get("already_finished"):
+            info(f"该季已全部看完（{current_watched}/{total}）")
+    elif status == "already_finished":
+        total = result.get("total_episodes", "?")
+        info(f"第{season}季已经全部看完了（{current_watched}/{total}）")
+    elif status == "already_watched":
+        info(f"第{season}季第{episode}集已经看过了")
+    else:
+        success(f"已记录：{media['title']} 第{season}季第{episode}集")
+        if result.get("all_finished"):
+            info("🎉 恭喜！这部剧已全部看完")
 
     updated = get_media(media_id)
     print_season_progress(updated.get("seasons", []))
